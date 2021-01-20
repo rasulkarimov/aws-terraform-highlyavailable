@@ -5,8 +5,10 @@ provider "aws" {
   region = "eu-north-1"
 }
 
-  data "aws_aviability_zones" "available" {}
-  data "aws_ami" "latest_amazon_linux" {
+
+
+data "aws_availability_zones" "available" {}
+data "aws_ami" "latest_amazon_linux" {
   owners      = ["amazon"]
   most_recent = true
   filter {
@@ -53,4 +55,66 @@ resource "aws_launch_configuration" "web" {
   }
 }
 
+resource "aws_autoscaling_group" "web" {
+  name = "ASG-${aws_launch_configuration.web.name}"
+  launch_configuration = aws_launch_configuration.web.name
+  min_size = 2
+  max_size = 2
+  min_elb_capacity = 2
+  vpc_zone_identifier = [aws_default_subnet.default_az1.id, aws_default_subnet.default_az1.id]
+  health_check_type = "ELB"
+  load_balancers = [aws_elb.web.name]
 
+  tags = [
+    {
+    key = "Name"
+    value = "WebServer-in-AutiScalingGroup"
+    propagate_at_launch = true
+    },
+    {
+    key = "Owner"
+    value = "Rasul Karimov"
+    propagate_at_launch = true
+    },
+  ]
+  
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_elb" "web" {
+  name = "webserver-ha-elb"
+  availability_zones = [data.aws_availability_zones.available.names[0], data.aws_availability_zones.available.names[1]]
+  security_groups = [aws_security_group.web.id]
+  listener {
+    lb_port = 80
+    lb_protocol = "http"
+    instance_port = 80
+    instance_protocol = "http"
+  }
+  health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 3
+    target              = "HTTP:80/"
+    interval            = 10
+  }
+  tags = {
+    Name = "WebServer-Highly-Available-ELB"
+  }  
+}
+
+
+resource "aws_default_subnet" "default_az1" {
+  availability_zone = data.aws_availability_zones.available.names[0]
+}
+
+resource "aws_default_subnet" "default_az2" {
+  availability_zone = data.aws_availability_zones.available.names[1]
+}
+
+#-------------------------------------------------------------------------
+output "web_loadbalancer_url" {
+  value = aws_elb.web.dns_name
+}
